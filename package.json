@@ -1,0 +1,25 @@
+{
+  "name": "devsecops-demo-taskmanager",
+  "version": "1.0.0",
+  "description": "DevSecOps demo app — intentionally vulnerable for security tool showcase",
+  "main": "src/app.js",
+  "scripts": {
+    "start":   "node src/app.js",
+    "start:secure": "node src/app.fixed.js",
+    "test":    "jest --coverage",
+    "lint":    "eslint src/"
+  },
+  "dependencies": {
+    "express":   "4.18.2",
+    "bcryptjs":  "2.4.3",
+    "lodash":    "4.17.20"
+  },
+  "devDependencies": {
+    "jest":      "^29.0.0",
+    "supertest": "^6.3.0",
+    "eslint":    "^8.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

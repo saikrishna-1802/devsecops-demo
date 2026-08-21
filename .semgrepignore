@@ -1,0 +1,4 @@
+# Tell Semgrep what to skip
+node_modules/
+*.fixed.js       # Skip the fixed files in demo — only scan the vulnerable ones
+*.test.js

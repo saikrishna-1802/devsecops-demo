@@ -1,0 +1,52 @@
+# ═══════════════════════════════════════════════════════════════════
+#  STAGE 1 — BROKEN PIPELINE (Demo Step 1)
+#
+#  PURPOSE: Show the team what happens when NO security tools are in place.
+#  Run this first. Everything passes because there are no checks at all.
+#  This represents "the old way" — ship code with zero visibility.
+#
+#  HOW TO USE:
+#    1. Push this file to dev branch with src/app.js (the vulnerable version)
+#    2. Show the team: "Green pipeline, but our code has 5 vulnerabilities"
+#    3. Say: "This is false confidence — passing does not mean safe"
+# ═══════════════════════════════════════════════════════════════════
+
+name: Stage 1 — No Security Checks (The Old Way)
+
+on:
+  workflow_dispatch:   # Manual trigger — run this on demand for the demo
+
+jobs:
+
+  build-and-ship:
+    name: Build and Ship (No security checks)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run basic tests (no security)
+        run: echo "Tests passed! (but we checked nothing security-related)"
+
+      - name: Ship to production
+        run: |
+          echo "================================================================"
+          echo "  ✅  Pipeline PASSED — deploying to production"
+          echo "  ⚠️  But our code has:"
+          echo "      • 2 hardcoded AWS credentials"
+          echo "      • 1 SQL Injection vulnerability"
+          echo "      • 1 XSS vulnerability"
+          echo "      • 1 Command Injection vulnerability"
+          echo "      • 1 weak MD5 password hash"
+          echo "      • 1 vulnerable npm package (lodash 4.17.20)"
+          echo "  We have ZERO visibility into any of this."
+          echo "================================================================"

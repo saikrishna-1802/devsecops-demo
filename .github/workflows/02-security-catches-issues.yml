@@ -1,0 +1,248 @@
+# ═══════════════════════════════════════════════════════════════════
+#  STAGE 2 — SECURITY TOOLS CATCHING ISSUES (Demo Step 2)
+#
+#  PURPOSE: Show the team what DevSecOps tools find in our existing code.
+#  Run this with the VULNERABLE src/app.js still in place.
+#  Multiple jobs will FAIL — that is the point. Each failure = a real finding.
+#
+#  HOW TO USE:
+#    1. Keep src/app.js (the vulnerable version) in the repo
+#    2. Push this workflow file to dev branch
+#    3. Go to Actions tab — watch jobs turn red
+#    4. Click each red job — show the exact vulnerability found
+#    5. Say: "Red is GOOD here — it means the tool is working"
+#
+#  Expected results:
+#    ❌  Secrets Detection  — finds AWS keys + DB password
+#    ❌  SAST (Semgrep)     — finds SQL injection, XSS, command injection, MD5
+#    ⚠️  SCA (npm audit)    — finds vulnerable lodash version
+#    ❌  Container Scan     — finds CVEs in node:14 base image
+#    ❌  IaC Scan           — finds open S3, open security group, unencrypted RDS
+#    ✅  File Check         — always passes (sanity check)
+# ═══════════════════════════════════════════════════════════════════
+
+name: Stage 2 — Security Tools Finding Issues
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+
+  # ──────────────────────────────────────────────────────
+  # JOB 1: SECRETS DETECTION
+  # Tool: Gitleaks
+  # Expected: ❌ FAIL — finds hardcoded AWS keys and DB_PASSWORD
+  # ──────────────────────────────────────────────────────
+  secrets-detection:
+    name: 🔑 Secrets Detection (Gitleaks)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Scan ALL commits, not just the latest
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # ❌ WILL FAIL — finds these in src/app.js:
+        #   - AKIAIOSFODNN7EXAMPLE  (AWS Access Key ID pattern)
+        #   - wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY (AWS Secret)
+        #   - SuperSecret123! (generic password pattern)
+
+  # ──────────────────────────────────────────────────────
+  # JOB 2: SAST — STATIC CODE ANALYSIS
+  # Tool: Semgrep
+  # Expected: ❌ FAIL — finds SQL injection, XSS, command injection, MD5
+  # ──────────────────────────────────────────────────────
+  sast-scan:
+    name: 🔍 SAST — Code Security (Semgrep)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Run Semgrep — OWASP Top 10 rules
+        run: |
+          semgrep \
+            --config "p/owasp-top-ten" \
+            --config "p/javascript" \
+            --config "p/secrets" \
+            --error \
+            --json \
+            src/app.js | tee semgrep-results.json
+
+          echo ""
+          echo "=== SEMGREP FINDINGS SUMMARY ==="
+          python3 -c "
+          import json, sys
+          data = json.load(open('semgrep-results.json'))
+          results = data.get('results', [])
+          if results:
+              print(f'Found {len(results)} security issue(s):')
+              for r in results:
+                  print(f'  Line {r[\"start\"][\"line\"]}: [{r[\"extra\"][\"severity\"]}] {r[\"check_id\"]}')
+                  print(f'    Message: {r[\"extra\"][\"message\"][:100]}')
+          else:
+              print('No issues found')
+          " || true
+
+        # ❌ WILL FAIL — finds:
+        #   - SQL string concatenation (line ~55)
+        #   - innerHTML / XSS pattern (line ~80)
+        #   - exec() with user input (line ~100)
+        #   - createHash('md5') for passwords (line ~120)
+
+      - name: Upload Semgrep results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-results
+          path: semgrep-results.json
+
+  # ──────────────────────────────────────────────────────
+  # JOB 3: SCA — DEPENDENCY VULNERABILITY SCAN
+  # Tool: npm audit (built into Node.js — no setup needed)
+  # Expected: ⚠️ WARNING — lodash 4.17.20 has known CVE
+  # ──────────────────────────────────────────────────────
+  sca-scan:
+    name: 📦 SCA — Dependency Scan (npm audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run npm audit
+        run: |
+          echo "=== DEPENDENCY VULNERABILITY SCAN ==="
+          npm audit --audit-level=moderate || true
+          echo ""
+          echo "=== AUDIT REPORT (JSON) ==="
+          npm audit --json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          vulns = data.get('vulnerabilities', {})
+          total = sum(v.get('severity') != 'info' for v in vulns.values())
+          print(f'Total vulnerable packages: {total}')
+          for name, v in vulns.items():
+              if v.get('severity') not in ('info',):
+                  print(f'  {name}: {v.get(\"severity\", \"unknown\").upper()} — {v.get(\"title\", \"\")}')
+          " || true
+
+        # ⚠️ Will show: lodash 4.17.20 has prototype pollution vulnerability
+
+      - name: Fail on HIGH or CRITICAL vulnerabilities
+        run: npm audit --audit-level=high
+        # This step will FAIL if HIGH or CRITICAL CVEs are found
+
+  # ──────────────────────────────────────────────────────
+  # JOB 4: CONTAINER SCAN
+  # Tool: Trivy
+  # Expected: ❌ FAIL — node:14 has many known CVEs
+  # ──────────────────────────────────────────────────────
+  container-scan:
+    name: 🐳 Container Scan (Trivy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build vulnerable Docker image
+        run: |
+          docker build \
+            -f docker/Dockerfile.vulnerable \
+            -t demo-app:vulnerable \
+            .
+
+      - name: Scan with Trivy — show all CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: demo-app:vulnerable
+          format: table
+          exit-code: 0        # Don't fail yet — just show findings
+          severity: CRITICAL,HIGH,MEDIUM
+
+      - name: Fail on CRITICAL CVEs
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: demo-app:vulnerable
+          format: table
+          exit-code: 1        # NOW fail the pipeline
+          severity: CRITICAL
+        # ❌ WILL FAIL — node:14 image has CRITICAL CVEs
+
+  # ──────────────────────────────────────────────────────
+  # JOB 5: IaC SCAN — CLOUD INFRASTRUCTURE
+  # Tool: Checkov
+  # Expected: ❌ FAIL — open S3, open SG, unencrypted RDS
+  # ──────────────────────────────────────────────────────
+  iac-scan:
+    name: ☁️  IaC Scan — Cloud Config (Checkov)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov on Terraform
+        run: |
+          checkov \
+            -f terraform/main.tf \
+            --framework terraform \
+            --compact \
+            --output cli \
+            || true    # Show results but don't fail yet
+
+      - name: Checkov — fail on HIGH severity
+        run: |
+          checkov \
+            -f terraform/main.tf \
+            --framework terraform \
+            --check CKV_AWS_20,CKV_AWS_24,CKV_AWS_17 \
+            --compact
+        # ❌ WILL FAIL — catches:
+        #   CKV_AWS_20: S3 bucket allows public access
+        #   CKV_AWS_24: Security group open to 0.0.0.0/0
+        #   CKV_AWS_17: RDS not encrypted
+
+  # ──────────────────────────────────────────────────────
+  # JOB 6: SANITY CHECK — always passes
+  # Shows that structure is fine, only security is the issue
+  # ──────────────────────────────────────────────────────
+  file-check:
+    name: ✅ File Structure Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify required files exist
+        run: |
+          echo "=== Checking required files ==="
+          for f in src/app.js package.json docker/Dockerfile.vulnerable terraform/main.tf; do
+            if [ -f "$f" ]; then
+              echo "  ✅ $f exists"
+            else
+              echo "  ❌ $f MISSING"
+              exit 1
+            fi
+          done
+          echo ""
+          echo "All required files present."
+          echo "NOTE: Files exist but contain vulnerabilities — see other jobs."

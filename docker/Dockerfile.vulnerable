@@ -1,0 +1,25 @@
+# ⚠️  VULNERABLE DOCKERFILE — FOR DEMO PURPOSES ONLY
+#
+# Issues Trivy and Checkov will catch:
+#   1. Running as root (no USER directive)
+#   2. Using a very old Node base image with many CVEs
+#   3. Exposing unnecessary ports
+#   4. No health check defined
+#   5. Copying everything including .env files
+
+FROM node:14-alpine
+
+# 🔴 No USER set — container runs as root
+WORKDIR /app
+
+# 🔴 Copies everything — including potential .env secrets files
+COPY . .
+
+RUN npm install
+
+# 🔴 Exposing debug port publicly
+EXPOSE 3000
+EXPOSE 9229
+
+# 🔴 No HEALTHCHECK defined
+CMD ["node", "src/app.js"]
