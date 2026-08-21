@@ -25,6 +25,8 @@
 name: Stage 3 — Full Secure Pipeline (Production Ready)
 
 on:
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
   push:
     branches: [dev, main]
   pull_request:
