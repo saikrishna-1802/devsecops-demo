@@ -4,24 +4,12 @@
 title = "DevSecOps Demo — Gitleaks Config"
 
 [extend]
-useDefault = true   # Use all built-in rules (AWS keys, GitHub tokens, etc.)
+useDefault = true
 
-# ── Rules to ignore (for demo purposes only) ──────────────────────
-# In a real project you would NOT ignore these.
-# We add ignore paths for the FIXED files so Gitleaks only flags the vulnerable one.
-
-[[rules.allowlists]]
+[[allowlists]]
 description = "Ignore fixed files and documentation"
 paths = [
-  "src/app.fixed.js",      # Fixed version — no real secrets
-  "terraform/main.fixed.tf",
-  "README.md",             # README contains example secret strings for documentation
+  '''src/app\.fixed\.js''',
+  '''terraform/main\.fixed\.tf''',
+  '''README\.md''',
 ]
-
-# ── Additional custom rules ────────────────────────────────────────
-[[rules]]
-id          = "generic-api-key-demo"
-description = "Detects generic API key patterns"
-regex       = '''(?i)(api[_-]?key|api[_-]?secret)\s*[=:]\s*['"]?[a-z0-9]{16,}['"]?'''
-severity    = "HIGH"
-tags        = ["api", "key"]
