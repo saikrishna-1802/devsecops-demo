@@ -175,6 +175,8 @@ jobs:
           format: table
           exit-code: 0        # Don't fail yet — just show findings
           severity: CRITICAL,HIGH,MEDIUM
+          trivyignores: .trivyignore
+
 
       - name: Fail on CRITICAL CVEs
         uses: aquasecurity/trivy-action@master
