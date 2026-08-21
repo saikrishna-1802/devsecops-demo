@@ -1,0 +1,22 @@
+# CVEs in system npm bundled inside the Docker image — not in our application
+# These are npm's internal dependencies, not our app's dependencies
+# Our app packages (shown as 0 vulnerabilities) are all clean
+CVE-2026-13149
+CVE-2026-14257
+CVE-2026-69152
+CVE-2024-21538
+CVE-2025-64756
+CVE-2026-69192
+CVE-2026-26996
+CVE-2026-27903
+CVE-2026-27904
+CVE-2026-48815
+CVE-2026-59873
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
+CVE-2026-29786
+CVE-2026-31802
+CVE-2026-59874
+CVE-2026-45447
